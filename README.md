@@ -1,5 +1,8 @@
 # CellScan 🔆
 
+[![CI](https://github.com/ritikgehlot/cellscan/actions/workflows/ci.yml/badge.svg)](https://github.com/ritikgehlot/cellscan/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/Code%20License-MIT-blue.svg)](LICENSE)
+
 **Explainable solar-cell defect detection from electroluminescence (EL) imagery — with calibrated confidence, not just predictions.**
 
 Cracked or degraded photovoltaic cells silently reduce energy yield, and EL-image inspection of modules is still largely manual. CellScan is a compact, fully reproducible screening model for EL cell images that answers three questions instead of one:
@@ -28,12 +31,25 @@ Upload an EL cell image → calibrated defect probability + Grad-CAM overlay sho
 
 | Metric (test split, n=394) | Value |
 |---|---|
-| AUROC | 0.9527 |
+| AUROC | 0.9513 |
 | Average precision | 0.9224 |
-| F1 (defective class) | 0.8185 |
+| F1 (defective class) | 0.8154 |
 | Precision / Recall (defective) | 0.7737 / 0.8618 |
-| ECE — uncalibrated → calibrated | 0.0726 → 0.0857 |
+| ECE — uncalibrated → calibrated | 0.0891 → 0.0931 |
 | AUROC mono / poly cells | 0.9304 / 0.9684 |
+| Temperature (fitted on val) | 1.21 |
+
+**On calibration, honestly:** the fitted T of 1.21 is close to 1 — the network
+was already nearly calibrated — and on this test split temperature scaling
+left ECE essentially unchanged (marginally worse, within noise for n=394).
+The pipeline measures calibration before and after precisely so this is
+visible rather than assumed; on a model with real overconfidence (T ≫ 1)
+the same machinery is what fixes it.
+
+<p align="center">
+  <img src="reports/reliability_diagram.png" width="46%" alt="Reliability diagram">
+  <img src="reports/confusion_matrix.png" width="46%" alt="Confusion matrix">
+</p>
 
 Reference points to beat before believing any model: predicting the majority class gives F1 = 0 on defects; the ELPV benchmark paper (Deitsch et al., 2019) reports ~88% accuracy for their CNN on a related 4-class formulation — a sanity anchor, **not** a direct comparison (different split and task binarization).
 
@@ -43,13 +59,13 @@ Reference points to beat before believing any model: predicting the majority cla
 - **Splits:** 70/15/15, seeded, stratified **jointly on label × cell type**, persisted to `data/splits.csv`. Mono and poly cells have very different texture; without joint stratification the test set silently skews.
 - **Model:** ImageNet-pretrained ResNet-18, grayscale replicated to 3 channels (keeps the pretrained stem useful), single-logit head, class-weighted `BCEWithLogitsLoss` for the 31/69 imbalance. Model selection by validation AUROC.
 - **Augmentation:** horizontal/vertical flips only. Rotations and crops create border artifacts that resemble the cracks we're detecting — mild augmentation is a deliberate choice, not laziness.
-- **Calibration:** temperature scaling (Guo et al., 2017) fitted on the validation split only; the scalar T ships inside the checkpoint. It cannot change AUROC — it makes the displayed probability *mean something*.
+- **Calibration:** temperature scaling (Guo et al., 2017) fitted on the validation split only; the scalar T ships inside the checkpoint. It cannot change AUROC — its job is to make the displayed probability trustworthy, and the pipeline reports ECE before/after so you can see whether it actually did (see Results).
 - **Explainability:** Grad-CAM on `layer4`, implemented from the paper in ~50 lines (`src/cellscan/gradcam.py`) — no third-party CAM dependency to drift.
 
 ## Reproduce everything
 
 ```bash
-git clone <this-repo> && cd cellscan
+git clone https://github.com/ritikgehlot/cellscan.git && cd cellscan
 pip install -r requirements.txt
 
 python scripts/prepare_data.py        # downloads ELPV, builds seeded splits
@@ -91,7 +107,6 @@ Benchmarked on **RTX 4060** (8 GB VRAM):
 - **Inference time:** ~50-70 ms per image
 - **Training time:** ~5 minutes for 15 epochs (AMP)
 
-Temperature scaling fitted to validation set: T = 1.51
 ## Roadmap
 
 - [ ] 4-class ordinal regression using the full defect-probability labels
